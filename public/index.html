@@ -15189,27 +15189,39 @@ function readPlaybackQualityPreference() {
 function savePlaybackQualityPreference() {
   try { localStorage.setItem(PLAYBACK_QUALITY_STORE_KEY, playbackQuality); } catch (e) {}
 }
+function currentPlaybackProviderKey() {
+  var s = (typeof playQueue !== 'undefined' && currentIdx >= 0 && playQueue[currentIdx]) ? playQueue[currentIdx] : null;
+  return s ? songProviderKey(s) : 'netease';
+}
 function updatePlaybackQualityUi() {
+  var provider = currentPlaybackProviderKey();
+  var isNetease = provider === 'netease';
   var label = document.getElementById('quality-btn-label');
   var btn = document.getElementById('quality-btn');
   var canUseSvip = hasProviderSvip('netease', loginStatus);
-  var displayQuality = playbackQuality === 'jymaster' && !canUseSvip ? 'hires' : playbackQuality;
+  // 超清母带(jymaster)是网易云 SVIP 专属；只有当前在放网易云歌曲时才按 SVIP 降级/锁定
+  var svipLocks = isNetease && !canUseSvip;
+  var displayQuality = (playbackQuality === 'jymaster' && svipLocks) ? 'hires' : playbackQuality;
   if (label) label.textContent = playbackQualityShortLabel(displayQuality);
-  if (btn) btn.title = playbackQuality === 'jymaster' && !canUseSvip
-    ? '音质: ' + playbackQualityLabel(displayQuality) + ' · 超清母带需网易云 SVIP'
-    : '音质: ' + playbackQualityLabel(displayQuality);
+  if (btn) {
+    var hint = provider === 'kugou' ? ' · 酷狗音源，高音质需会员，否则回落 128k'
+      : (provider === 'qq' ? ' · QQ 音乐'
+      : (playbackQuality === 'jymaster' && svipLocks ? ' · 超清母带需网易云 SVIP' : ''));
+    btn.title = '音质: ' + playbackQualityLabel(displayQuality) + hint;
+  }
   document.querySelectorAll('.quality-option').forEach(function(option){
     var q = normalizePlaybackQuality(option.dataset.quality);
-    var locked = option.dataset.svip === '1' && !canUseSvip;
+    var locked = option.dataset.svip === '1' && svipLocks;   // 仅网易云无 SVIP 时锁超清母带
     option.classList.toggle('active', q === displayQuality);
     option.classList.toggle('locked', locked);
     option.disabled = locked;
-    option.title = locked ? '需要网易云 SVIP 账号' : playbackQualityLabel(q);
+    option.title = locked ? '需要网易云 SVIP 账号'
+      : (provider === 'kugou' ? (playbackQualityLabel(q) + ' · 酷狗 ' + kugouQualityParam(q)) : playbackQualityLabel(q));
   });
 }
 function setPlaybackQuality(value) {
   var next = normalizePlaybackQuality(value);
-  if (next === 'jymaster' && !hasProviderSvip('netease', loginStatus)) {
+  if (next === 'jymaster' && currentPlaybackProviderKey() === 'netease' && !hasProviderSvip('netease', loginStatus)) {
     showToast(hasPlatformLogin('netease') ? '超清母带需要网易云 SVIP' : '登录网易云 SVIP 后可用超清母带');
     if (!hasPlatformLogin('netease')) openProviderLogin('netease');
     return;
@@ -18516,7 +18528,10 @@ async function playQueueAt(idx, opts) {
       return;
     }
     var resolvedQualityText = playbackResolvedQualityText(data);
-    if (!isQQPlayback && playbackQualityWasDowngraded(requestedQuality, data.level)) {
+    if (isKugouPlayback) {
+      if (data.downgraded) showSourceFallbackNotice('酷狗音质已回落', '当前账号无法播放所选高音质，已回落到 128k 流畅音质。');
+      else if (opts.qualitySwitch) showSourceFallbackNotice('酷狗音质已切换', '实际播放: ' + (data.br ? Math.round(data.br / 1000) + 'k' : (data.ext || '流畅')) + '。');
+    } else if (!isQQPlayback && playbackQualityWasDowngraded(requestedQuality, data.level)) {
       showSourceFallbackNotice('网易云音质自动降级', '请求 ' + playbackQualityLabel(requestedQuality) + '，实际播放 ' + resolvedQualityText + '。');
     } else if (opts.qualitySwitch) {
       showSourceFallbackNotice('音质已切换', '实际播放: ' + resolvedQualityText + '。');
